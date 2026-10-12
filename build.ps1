@@ -1,7 +1,8 @@
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$BuildJavaHome = $env:JAVA_HOME,
     [string]$Java8Home = $env:JAVA8_HOME,
-    [Parameter(ValueFromRemainingArguments = $true)]
+    [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
     [string[]]$GradleArgs = @('build')
 )
 
