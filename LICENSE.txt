@@ -1,7 +1,7 @@
 All Rights Reserved (ARR)
 
-This project is a backport of RenderLib by Meldexun (https://github.com/Meldexun).
+This project is a backport of RenderLib by Meldexun (https://github.com/Meldexun) and RenderLib-1.8.9-port by my-life-is-bad.
 
 You are NOT permitted to redistribute, modify, or use this code without explicit permission from the original author (Meldexun).
 
-Porting and other modifications by Abyan Shamsi (aka my-life-is-bad).
+Porting and other modifications by MasqueOu.
