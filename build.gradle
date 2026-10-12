@@ -88,7 +88,7 @@ dependencies {
 
     // The exact runtime Mixin binary from the validated Java 8 build is pinned locally.
     shade files('vendor/mixin-0.7.11-20180703.121122-1.jar')
-    shade 'it.unimi.dsi:fastutil:7.1.0'
+    shade 'it.unimi.dsi:fastutil:8.5.19'
     shade files('vendor/asmutil-2.8.1-masqueou-log4j-beta9.jar')
     shade 'meldexun:MemoryUtil:1.1.0@jar'
     shade 'meldexun:MatrixUtil:1.5.0@jar'
