@@ -48,6 +48,8 @@ public final class LibraryCompatibilityTest {
             ClassLoader previousLoader = Thread.currentThread().getContextClassLoader();
             Thread.currentThread().setContextClassLoader(loader);
             try {
+            System.out.println("Effective consumer fastutil: " + loader.loadClass("it.unimi.dsi.fastutil.ints.IntArrayList")
+                    .getProtectionDomain().getCodeSource().getLocation());
             LibraryCompatibilityTest test = new LibraryCompatibilityTest(loader);
             test.verifyReferences(args[0], "meldexun/renderlib/");
             test.verifyReferences(args[1], "meldexun/nothirium/");

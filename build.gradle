@@ -59,6 +59,7 @@ configurations {
     verificationSupport
     consumerVerification
     consumerVerifierAsm
+    legacyFastutilVerification
 }
 configurations.implementation.extendsFrom(configurations.shade)
 
@@ -107,6 +108,7 @@ dependencies {
     verificationSupport 'org.apache.logging.log4j:log4j-api:2.0-beta9'
     verificationSupport 'org.apache.logging.log4j:log4j-core:2.0-beta9'
     consumerVerifierAsm 'org.ow2.asm:asm-debug-all:5.0.3'
+    legacyFastutilVerification 'it.unimi.dsi:fastutil:7.1.0'
     if (providers.gradleProperty('nothiriumJar').isPresent()) {
         consumerVerification files(providers.gradleProperty('nothiriumJar').get())
     } else {
@@ -214,9 +216,40 @@ tasks.register('verifyConsumerApi', JavaExec) {
         args(tasks.named('remapJar').get().archiveFile.get().asFile.absolutePath,
                 configurations.consumerVerification.singleFile.absolutePath, support.asPath)
         if (providers.gradleProperty('candidateJar').isPresent()) args(providers.gradleProperty('candidateJar').get())
+        else if (providers.gradleProperty('fastutilProviderJar').isPresent()) args(providers.gradleProperty('fastutilProviderJar').get())
     }
 }
 tasks.named('check') { dependsOn tasks.named('verifyConsumerApi') }
+
+def compileShaderBuilderCompatibilityTest = tasks.register('compileShaderBuilderCompatibilityTest', JavaCompile) {
+    source 'src/verification/java/meldexun/renderlib/validation/ShaderBuilderCompatibilityTest.java',
+            fileTree('src/verification/shader')
+    classpath = files()
+    destinationDirectory = layout.buildDirectory.dir('shader-builder-compatibility-test')
+    javaCompiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(8) }
+    sourceCompatibility = targetCompatibility = '1.8'
+    options.compilerArgs = ['-proc:none']
+}
+def registerShaderBuilderCheck = { String name, Closure provider ->
+    tasks.register(name, JavaExec) {
+        dependsOn compileShaderBuilderCompatibilityTest, tasks.named('remapJar')
+        classpath = files(compileShaderBuilderCompatibilityTest.map { it.destinationDirectory })
+        mainClass = 'meldexun.renderlib.validation.ShaderBuilderCompatibilityTest'
+        javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(8) }
+        doFirst {
+            args(tasks.named('remapJar').get().archiveFile.get().asFile.absolutePath,
+                    provider().absolutePath,
+                    compileShaderBuilderCompatibilityTest.get().destinationDirectory.get().asFile.absolutePath)
+        }
+    }
+}
+registerShaderBuilderCheck('verifyShaderBuilderLegacyFastutil', { configurations.legacyFastutilVerification.singleFile })
+registerShaderBuilderCheck('verifyShaderBuilderBundledFastutil', { tasks.named('remapJar').get().archiveFile.get().asFile })
+tasks.named('check') { dependsOn 'verifyShaderBuilderLegacyFastutil', 'verifyShaderBuilderBundledFastutil' }
+if (providers.gradleProperty('fastutilProviderJar').isPresent()) {
+    registerShaderBuilderCheck('verifyShaderBuilderCoremodFastutil', { file(providers.gradleProperty('fastutilProviderJar').get()) })
+    tasks.named('check') { dependsOn 'verifyShaderBuilderCoremodFastutil' }
+}
 
 apply from: 'gradle/verify-artifact.gradle'
 

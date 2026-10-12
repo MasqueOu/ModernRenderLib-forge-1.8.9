@@ -1,5 +1,6 @@
 package meldexun.renderlib.util;
 
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
@@ -104,9 +105,10 @@ public class GLShader {
 
 				shaderList.add(shader);
 			}
-			shaderList.forEach(shader -> GL20.glAttachShader(program, shader));
+			// Coremods may load an older fastutil first. Keep the Java 8 overloads.
+			shaderList.forEach((Consumer<Integer>) shader -> GL20.glAttachShader(program, shader));
 
-			attributeMap.forEach((attribute, index) -> GL20.glBindAttribLocation(program, index, attribute));
+			attributeMap.forEach((BiConsumer<String, Integer>) (attribute, index) -> GL20.glBindAttribLocation(program, index, attribute));
 
 			GL20.glLinkProgram(program);
 
@@ -117,7 +119,7 @@ public class GLShader {
 				throw new RuntimeException(String.format("Failed to link program: %d%n%s", linkStatus, programInfoLog));
 			}
 
-			shaderList.forEach(GL20::glDeleteShader);
+			shaderList.forEach((Consumer<Integer>) GL20::glDeleteShader);
 
 			return new GLShader(program);
 		}
