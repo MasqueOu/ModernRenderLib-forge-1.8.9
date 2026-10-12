@@ -1,0 +1,123 @@
+import groovy.json.JsonSlurper
+import org.objectweb.asm.ClassReader
+import org.objectweb.asm.Opcodes
+import org.objectweb.asm.tree.ClassNode
+import org.objectweb.asm.tree.MethodInsnNode
+import java.util.jar.JarFile
+
+buildscript {
+    repositories { mavenCentral() }
+    dependencies {
+        classpath 'org.ow2.asm:asm:9.3'
+        classpath 'org.ow2.asm:asm-tree:9.3'
+    }
+}
+
+tasks.register('verifyModJar') {
+    dependsOn tasks.named('remapJar')
+    inputs.file(tasks.named('remapJar').flatMap { it.archiveFile })
+    inputs.file('src/main/resources/META-INF/accesstransformer.cfg')
+
+    doLast {
+        def artifact = tasks.named('remapJar').get().archiveFile.get().asFile
+        def jar = new JarFile(artifact)
+        try {
+            def attributes = jar.manifest.mainAttributes
+            [
+                FMLCorePlugin: 'meldexun.renderlib.asm.RenderLibPlugin',
+                ForceLoadAsMod: 'true',
+                TweakOrder: '0',
+                ModSide: 'CLIENT',
+                FMLCorePluginContainsFMLMod: 'true',
+                TweakClass: 'org.spongepowered.asm.launch.MixinTweaker',
+                MixinConfigs: 'mixins.renderlib.json',
+                FMLAT: 'accesstransformer.cfg'
+            ].each { name, value ->
+                if (attributes.getValue(name) != value) throw new GradleException("Invalid manifest attribute ${name}")
+            }
+
+            def read = { name ->
+                def entry = jar.getEntry(name)
+                if (entry == null) throw new GradleException("Missing JAR entry ${name}")
+                jar.getInputStream(entry).withCloseable { it.getText('UTF-8') }
+            }
+            def rules = { text ->
+                text.readLines().collect { it.split('#', 2)[0].trim().replaceAll(/\s+/, ' ') }
+                    .findAll { !it.isEmpty() }.sort()
+            }
+            if (rules(read('META-INF/accesstransformer.cfg')) != rules(file('src/main/resources/META-INF/accesstransformer.cfg').getText('UTF-8'))) {
+                throw new GradleException('Access transformer rules changed during packaging/remapping')
+            }
+            def mixins = new JsonSlurper().parseText(read('mixins.renderlib.json'))
+            if (mixins.compatibilityLevel != 'JAVA_8' || mixins.refmap != 'mixins.renderlib.refmap.json') {
+                throw new GradleException('Invalid Mixin compatibility level/refmap declaration')
+            }
+            def refmap = new JsonSlurper().parseText(read(mixins.refmap))
+            def world = refmap.mappings['meldexun/renderlib/mixin/MixinWorld']
+            if (world?.updateEntities != 'Lnet/minecraft/world/World;func_72939_s()V') {
+                throw new GradleException('updateEntities is not remapped to the Forge 1.8.9 SRG method')
+            }
+            if (world.containsKey('Ljava/util/List;removeAll(Ljava/util/Collection;)Z')) {
+                throw new GradleException('Java List.removeAll must not be remapped')
+            }
+
+            def classCount = 0
+            def minecraftSrgCall = false
+            def mixinVersion = null
+            def bufferApi = []
+            def log4jJar = configurations.compileClasspath.files.find { it.name == 'log4j-api-2.0-beta9.jar' }
+            if (log4jJar == null) throw new GradleException('Compilation is not using the Minecraft 1.8.9 Log4j API')
+            def loggerApi = [] as Set
+            new JarFile(log4jJar).withCloseable { logging ->
+                def logger = new ClassNode()
+                logging.getInputStream(logging.getEntry('org/apache/logging/log4j/Logger.class')).withCloseable {
+                    new ClassReader(it).accept(logger, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES)
+                }
+                logger.methods.each { loggerApi.add(it.name + it.desc) }
+            }
+
+            jar.entries().each { entry ->
+                if (entry.name.startsWith('my_life_is_bad/') || entry.name.contains('GLBufferMappingTest') || entry.name.contains('GLUtil$Capabilities')) {
+                    throw new GradleException("Unexpected runtime/test dependency ${entry.name}")
+                }
+                if (entry.name.endsWith('.class')) {
+                    def bytes = jar.getInputStream(entry).withCloseable { it.bytes }
+                    def major = ((bytes[6] & 255) << 8) | (bytes[7] & 255)
+                    if (major > 52) throw new GradleException("${entry.name} requires Java newer than 8 (${major})")
+                    def node = new ClassNode()
+                    new ClassReader(bytes).accept(node, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES)
+                    classCount++
+                    if (node.name == 'org/spongepowered/asm/launch/MixinBootstrap') {
+                        mixinVersion = node.fields.find { it.name == 'VERSION' }?.value
+                    }
+                    if (node.name == 'meldexun/renderlib/util/GLBuffer') {
+                        bufferApi = node.methods.findAll { (it.access & Opcodes.ACC_PUBLIC) != 0 }.collect { it.name + it.desc }.sort()
+                    }
+                    node.methods.each { method ->
+                        method.instructions.iterator().each { instruction ->
+                            if (instruction instanceof MethodInsnNode) {
+                                if (instruction.owner == 'net/minecraft/client/Minecraft') {
+                                    if (instruction.name == 'getMinecraft') throw new GradleException('Unobfuscated Minecraft call in the distribution JAR')
+                                    if (instruction.name == 'func_71410_x') minecraftSrgCall = true
+                                }
+                                if (instruction.owner == 'org/apache/logging/log4j/Logger' && !loggerApi.contains(instruction.name + instruction.desc)) {
+                                    throw new GradleException("Log4j beta9 incompatible call in ${node.name}: ${instruction.name}${instruction.desc}")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            def expectedBufferApi = ['<init>(JII)V', '<init>(JIIZI)V', 'getBuffer()I', 'getSize()J',
+                'map(II)V', 'map(JII)V', 'isMapped()Z', 'unmap()V', 'getByteBuffer()Ljava/nio/ByteBuffer;',
+                'getAddress()J', 'dispose()V'].sort()
+            if (bufferApi != expectedBufferApi) throw new GradleException('Public GLBuffer API changed')
+            if (!minecraftSrgCall || mixinVersion != '0.7.11') throw new GradleException('SRG remapping/runtime Mixin verification failed')
+            logger.lifecycle("Verified ${artifact.name}: ${classCount} Java 8 classes, SRG calls, manifest, AT, refmap, Mixin ${mixinVersion}, Log4j beta9 and GLBuffer API.")
+        } finally {
+            jar.close()
+        }
+    }
+}
+
+tasks.named('check') { dependsOn tasks.named('verifyModJar') }

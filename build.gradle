@@ -1,255 +1,197 @@
-buildscript {
-    repositories {
-        maven { url "https://maven.minecraftforge.net" }
-        maven { url 'https://repo.spongepowered.org/maven'}
-    }
-    dependencies {
-        classpath "net.minecraftforge.gradle:ForgeGradle:2.1-SNAPSHOT"
-        classpath 'org.spongepowered:mixingradle:0.6-SNAPSHOT'
-    }
-}
-
 plugins {
-    id "java"
-    id "com.github.johnrengelman.shadow" version "2.0.4"
+    id 'java'
+    id 'idea'
+    id 'gg.essential.loom' version '0.10.0.5'
+    id 'dev.architectury.architectury-pack200' version '0.1.3'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
-apply plugin: "net.minecraftforge.gradle.forge"
-apply plugin: 'org.spongepowered.mixin'
+version = '1.4.5.5'
+group = 'meldexun.renderlib'
+base.archivesName = 'RenderLib-1.8.9-port-1.8.9'
 
-//TODO: Change the version, group, and archivesBaseName to your own.
-version = "1.4.5.5" // The version number of your mod.
-group = "meldexun.renderlib" // This is the group of the mod (usually domain or your name -> at.manuthebyte)
-archivesBaseName = "RenderLib-1.8.9-port-1.8.9" // This is the name of the jar that is generated.
-
-sourceCompatibility = targetCompatibility = 1.8 // Java version to compile for.
-compileJava.options.encoding = "UTF-8" // Make sure that the encoding is set to UTF-8, so we have no encoding issues.
-
-minecraft {
-    version = "1.8.9-11.15.1.2318-1.8.9" // Version 1.8.9
-    runDir = "run" // Where to put the forge run data (mods, configs, etc.), in a normal minecraft installation this is .minecraft
-    mappings = "stable_22" // The mappings for 1.8.9
-    makeObfSourceJar = false // Disables the creation of a source jar
-    at 'src/main/resources/META-INF/accesstransformer.cfg'
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(8)
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
 }
 
-// This is the configuration for the shadow plugin, which is used to add libraries to the jar.
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+loom {
+    forge {
+        pack200Provider = new dev.architectury.pack200.java.Pack200Adapter()
+        useCustomMixin = false
+        accessTransformer(file('src/main/resources/META-INF/accesstransformer.cfg'))
+        mixinConfig('mixins.renderlib.json')
+    }
+    mixin {
+        add(sourceSets.main, 'mixins.renderlib.refmap.json')
+    }
+    launchConfigs {
+        client {
+            property('fml.coreMods.load', 'meldexun.renderlib.asm.RenderLibPlugin')
+            arg('--tweakClass', 'org.spongepowered.asm.launch.MixinTweaker')
+        }
+    }
+    runConfigs {
+        client { runDir = 'run' }
+        remove(getByName('server'))
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.spongepowered.org/maven/' }
+    ivy {
+        url = 'https://github.com/'
+        patternLayout {
+            artifact '[organisation]/[module]/releases/download/v[revision]/[module]-[revision].[ext]'
+        }
+        metadataSources { artifact() }
+    }
+}
+
 configurations {
     shade
-    mixinProcessor
-    compile.extendsFrom(shade)
+    verificationSupport
+}
+configurations.implementation.extendsFrom(configurations.shade)
+
+// The AP is build-only. Keep its newer Mixin/ASM separate from the Java 8 game runtime.
+configurations.annotationProcessor.exclude(group: 'net.fabricmc', module: 'sponge-mixin')
+['compileClasspath', 'runtimeClasspath'].each { name ->
+    configurations.named(name) {
+        resolutionStrategy.force 'org.apache.logging.log4j:log4j-api:2.0-beta9',
+                'org.apache.logging.log4j:log4j-core:2.0-beta9',
+                'org.ow2.asm:asm-debug-all:5.0.3'
+    }
 }
 
-def mixinVersion = '0.7.11-SNAPSHOT'
-// ForgeGradle automatically adds libs/** to compile; keep this runtime-only JAR outside it.
 def configurationsBackportJar = file('vendor/ConfigurationsBackport-1.8.9-1.1-masqueou-mixin-0.7.11.jar')
-
-// Keep the modified runtime artifact intact, but use only its own classes when compiling.
-// Its bundled Mixin and annotation processor must not shadow the declared Mixin dependency.
-task configurationsBackportApiJar(type: Jar) {
-    archiveName = 'ConfigurationsBackport-1.8.9-1.1-masqueou-mixin-0.7.11-api.jar'
-    destinationDir = file("$buildDir/dependencies")
-    from(zipTree(configurationsBackportJar)) {
-        include 'my_life_is_bad/**'
-    }
+def configurationsBackportApiJar = tasks.register('configurationsBackportApiJar', Jar) {
+    archiveFileName = 'ConfigurationsBackport-1.8.9-1.1-masqueou-mixin-0.7.11-api.jar'
+    destinationDirectory = layout.buildDirectory.dir('dependencies')
+    from(zipTree(configurationsBackportJar)) { include 'my_life_is_bad/**' }
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
 }
 
-compileJava {
-    dependsOn configurationsBackportApiJar
-    options.annotationProcessorPath = configurations.mixinProcessor
-}
-
-// Configures the SpongePowered Repository
-repositories {
-    maven { url 'https://repo.spongepowered.org/maven/' }
-    maven { url = 'https://www.cursemaven.com' }
-    ivy {
-    url 'https://github.com/'
-
-    layout('pattern') {
-        artifact '[organisation]/[module]/releases/download/v[revision]/[module]-[revision].[ext]'
-        }
-    }
-}
-
-def systemOs = System.getProperty("os.name").toLowerCase(Locale.ENGLISH)
-
-/**
- * This is where we bundle mixins into the jar.
- * shade -> bundles the library into the jar
- * compile -> library only available at compile time (not accessible at runtime)
- */
 dependencies {
-    shade("org.spongepowered:mixin:${mixinVersion}") {
-        exclude module: 'launchwrapper'
-        exclude module: 'guava'
-        exclude module: 'gson'
-        exclude module: 'commons-io'
-        exclude module: 'log4j-core'
-    }
+    minecraft 'com.mojang:minecraft:1.8.9'
+    mappings 'de.oceanlabs.mcp:mcp_stable:22-1.8.9'
+    forge 'net.minecraftforge:forge:1.8.9-11.15.1.2318-1.8.9'
 
-    // Isolate Mixin's processor and its support libraries from bundled mod processors.
-    mixinProcessor("org.spongepowered:mixin:${mixinVersion}") {
-        transitive = false
-    }
-    mixinProcessor 'com.google.code.gson:gson:2.2.4'
-    mixinProcessor 'com.google.guava:guava:17.0'
+    // The exact runtime Mixin binary from the validated Java 8 build is pinned locally.
+    shade files('vendor/mixin-0.7.11-20180703.121122-1.jar')
+    shade 'it.unimi.dsi:fastutil:7.1.0'
+    shade files('libs/ASMUtil-2.8.0.jar')
+    shade 'meldexun:MemoryUtil:1.1.0@jar'
+    shade 'meldexun:MatrixUtil:1.5.0@jar'
+    shade 'meldexun:ReflectionUtil:1.0.0@jar'
+    shade 'meldexun:RandomUtil:1.0.0@jar'
 
-    shade('it.unimi.dsi:fastutil:7.1.0')
-
-    shade files('libs/ASMUtil-2.8.0.jar')     //patched for 1.8.9 log4j 2.0-beta9
     compileOnly files(configurationsBackportApiJar)
-    runtime files(configurationsBackportJar)
+    modRuntimeOnly files(configurationsBackportJar)
 
-    shade('meldexun:MemoryUtil:1.1.0@jar')
-    shade('meldexun:MatrixUtil:1.5.0@jar')
-    shade('meldexun:ReflectionUtil:1.0.0@jar')
-    shade('meldexun:RandomUtil:1.0.0@jar')
+    annotationProcessor('org.spongepowered:mixin:0.8.5') { transitive = false }
+    annotationProcessor 'com.google.code.gson:gson:2.2.4'
+    annotationProcessor 'com.google.guava:guava:17.0'
 
-
-    if (systemOs.contains("mac"))
-    {
-        compile 'org.lwjgl.lwjgl:lwjgl_util:2.9.4-nightly-20150209'
-        compile 'org.lwjgl.lwjgl:lwjgl:2.9.4-nightly-20150209'
-        compile 'org.lwjgl.lwjgl:lwjgl-platform:2.9.4-nightly-20150209'
-    }
-    else if (systemOs.contains("linux"))
-    {
-        compile 'org.lwjgl.lwjgl:lwjgl_util:2.9.4-babric.1'
-        compile 'org.lwjgl.lwjgl:lwjgl:2.9.4-babric.1'
-        compile 'org.lwjgl.lwjgl:lwjgl-platform:2.9.4-babric.1'
-    }
+    verificationSupport 'com.google.code.gson:gson:2.2.4'
+    verificationSupport 'com.google.guava:guava:17.0'
+    verificationSupport 'org.apache.logging.log4j:log4j-api:2.0-beta9'
+    verificationSupport 'org.apache.logging.log4j:log4j-core:2.0-beta9'
 }
 
-if (systemOs.contains("mac"))
-{
-    configurations.all
-    {
-        resolutionStrategy
-        {
-            dependencySubstitution
-            {
-                substitute module('org.lwjgl.lwjgl:lwjgl_util:2.9.2-nightly-201408222') with module('org.lwjgl.lwjgl:lwjgl_util:2.9.4-nightly-20150209')
-                substitute module('org.lwjgl.lwjgl:lwjgl:2.9.2-nightly-201408222') with module('org.lwjgl.lwjgl:lwjgl:2.9.4-nightly-20150209')
-            }
-            force 'org.lwjgl.lwjgl:lwjgl-platform:2.9.4-nightly-20150209'
-        }
-    }
-} else if (systemOs.contains("linux"))
-{
-    configurations.all
-    {
-        resolutionStrategy
-        {
-            dependencySubstitution
-            {
-                substitute module('org.lwjgl.lwjgl:lwjgl_util:2.9.4-nightly-20150209') using module('org.lwjgl.lwjgl:lwjgl_util:2.9.4-babric.1')
-                substitute module('org.lwjgl.lwjgl:lwjgl:2.9.4-nightly-20150209') using module('org.lwjgl.lwjgl:lwjgl:2.9.4-babric.1')
-            }
-            force 'org.lwjgl.lwjgl:lwjgl-platform:2.9.4-babric.1'
-        }
+tasks.named('compileJava') { dependsOn configurationsBackportApiJar }
+
+tasks.named('processResources') {
+    inputs.property('version', project.version)
+    inputs.property('mcversion', '1.8.9')
+    filesMatching('mcmod.info') {
+        expand(version: project.version, mcversion: '1.8.9')
     }
 }
 
+def modManifest = [
+    'FMLCorePlugin': 'meldexun.renderlib.asm.RenderLibPlugin',
+    'ForceLoadAsMod': 'true',
+    'TweakOrder': '0',
+    'ModSide': 'CLIENT',
+    'FMLCorePluginContainsFMLMod': 'true',
+    'TweakClass': 'org.spongepowered.asm.launch.MixinTweaker',
+    'MixinConfigs': 'mixins.renderlib.json',
+    'FMLAT': 'accesstransformer.cfg'
+]
 
-processResources {
-    inputs.property "version", project.version
-    inputs.property "mcversion", project.minecraft.version
-
-    // Replaces version in mcmod.info with the project version.
-    from(sourceSets.main.resources.srcDirs) {
-        include "mcmod.info"
-
-        //replace version and mcversion
-        expand "version":project.version, "mcversion":project.minecraft.version
-    }
-
-    // Copies all other resources.
-    from(sourceSets.main.resources.srcDirs) {
-        exclude "mcmod.info"
-    }
-
-    rename '(.+_at.cfg)', 'META-INF/$1'
+tasks.withType(Jar).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
 }
-
-// This is the configuration for the shadow plugin, which is used to add libraries to the jar.
-shadowJar {
-    dependencies {}
-    configurations = [project.configurations.shade] // Adds the gradle configuration "shade" so we can use it.
-    duplicatesStrategy DuplicatesStrategy.EXCLUDE // Prevents duplicates
-    classifier ""
+tasks.named('jar') {
+    archiveClassifier = 'without-deps'
+    destinationDirectory = layout.buildDirectory.dir('intermediates')
+    manifest.attributes(modManifest)
 }
-
-reobf {
-    // Reobfuscates the jar.
-    shadowJar {}
+tasks.named('shadowJar') {
+    configurations = [project.configurations.shade]
+    archiveClassifier = 'dev-with-deps'
+    destinationDirectory = layout.buildDirectory.dir('intermediates')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA',
+            'module-info.class', 'META-INF/versions/**'
+    manifest.attributes(modManifest)
 }
-
-/**
- * Adds the manifest values
- * FMLCorePlugin -> Put the Mixin Loader here
- * ModSide -> Client or Server
- * TweakClass -> Mixin tweaker
- * MixinConfigs -> Put your mixin config here (mixins.MODID.json)
- */
-//TODO: Change the FMLCorePlugin to the mixin loader with your own package
-//TODO: Add your own MixinConfig(s)
-jar {
-    manifest.attributes(
-        "FMLCorePlugin" : "meldexun.renderlib.asm.RenderLibPlugin",
-        "ForceLoadAsMod": true,
-        "TweakOrder": 0,
-        "ModSide": "CLIENT",
-        'FMLCorePluginContainsFMLMod': true,
-        'TweakClass': 'org.spongepowered.asm.launch.MixinTweaker',
-        'MixinConfigs': 'mixins.renderlib.json',
-        'FMLAT': 'accesstransformer.cfg'
-    )
+tasks.named('remapJar') {
+    dependsOn tasks.named('shadowJar')
+    input = tasks.named('shadowJar').flatMap { it.archiveFile }
+    archiveClassifier = ''
+    fromM = 'named'
+    toM = 'srg'
 }
+tasks.named('assemble') { dependsOn tasks.named('remapJar') }
 
-// This adds the refmap.
-// (You do not need to create the refmap, it is created automatically by the mixin plugin)
-//TODO: Change the refmap name to your own
-sourceSets {
-    main {
-        ext.refMap = "mixins.renderlib.refmap.json"
-    }
-}
-
-// ForgeGradle 2.1 derives source-set runtime classpaths from compile dependencies.
-afterEvaluate {
-    sourceSets.main.runtimeClasspath = sourceSets.main.runtimeClasspath - files(configurationsBackportApiJar) + files(configurationsBackportJar)
-}
-
-// Exercise mapping failures without a native OpenGL context or additional test libraries.
-task compileGLBufferMappingTest(type: JavaCompile) {
+def compileGLBufferMappingTest = tasks.register('compileGLBufferMappingTest', JavaCompile) {
     source files('src/main/java/meldexun/renderlib/util/GLBuffer.java',
             'src/main/java/meldexun/renderlib/util/GLException.java', fileTree('src/test/glbuffer'))
     classpath = files()
-    destinationDir = file("$buildDir/glbuffer-mapping-test")
+    destinationDirectory = layout.buildDirectory.dir('glbuffer-mapping-test')
+    javaCompiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(8) }
     sourceCompatibility = targetCompatibility = '1.8'
     options.compilerArgs = ['-proc:none']
 }
-
-task verifyGLBufferMappings(type: JavaExec, dependsOn: compileGLBufferMappingTest) {
-    classpath = files(compileGLBufferMappingTest.destinationDir)
-    main = 'meldexun.renderlib.util.GLBufferMappingTest'
+tasks.register('verifyGLBufferMappings', JavaExec) {
+    dependsOn compileGLBufferMappingTest
+    classpath = files(compileGLBufferMappingTest.map { it.destinationDirectory })
+    mainClass = 'meldexun.renderlib.util.GLBufferMappingTest'
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(8) }
 }
+tasks.named('check') { dependsOn tasks.named('verifyGLBufferMappings') }
 
-check.dependsOn verifyGLBufferMappings
-
-// Task that will build the mod and copy it to your instance (need to change the path to your instance)
-//TODO: (Optional) Change the path to your instance
-task buildAndCopyToMods(type: Copy, dependsOn: 'build') {
-    from "build/libs"
-    into "<yourRealInstance>/.minecraft/mods"
-    include "*.jar"
+def compileRuntimeRefmapTest = tasks.register('compileRuntimeRefmapTest', JavaCompile) {
+    source 'src/verification/java/meldexun/renderlib/validation/RuntimeRefmapTest.java'
+    classpath = configurations.shade + configurations.verificationSupport
+    destinationDirectory = layout.buildDirectory.dir('runtime-refmap-test')
+    javaCompiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(8) }
+    sourceCompatibility = targetCompatibility = '1.8'
+    options.compilerArgs = ['-proc:none']
 }
-
-// Task that will build the mod and put it in the "run" folder, and then run the client.
-task buildCopyToRunModsAndRun(type: Copy, dependsOn: 'build') {
-    from "build/libs"
-    into "run/mods"
-    include "*.jar"
+tasks.register('verifyRuntimeRefmap', JavaExec) {
+    dependsOn compileRuntimeRefmapTest, tasks.named('remapJar')
+    classpath = files(compileRuntimeRefmapTest.map { it.destinationDirectory }) + configurations.shade + configurations.verificationSupport
+    mainClass = 'meldexun.renderlib.validation.RuntimeRefmapTest'
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(8) }
+    args(tasks.named('remapJar').get().archiveFile.get().asFile.absolutePath)
 }
-buildCopyToRunModsAndRun.finalizedBy runClient
+tasks.named('check') { dependsOn tasks.named('verifyRuntimeRefmap') }
+
+apply from: 'gradle/verify-artifact.gradle'
+
+tasks.register('buildAndCopyToMods', Copy) {
+    dependsOn tasks.named('remapJar')
+    from(tasks.named('remapJar').flatMap { it.archiveFile })
+    into(providers.gradleProperty('modsDir').orElse('run/mods'))
+}
