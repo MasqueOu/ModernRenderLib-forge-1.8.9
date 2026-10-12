@@ -36,7 +36,27 @@ minecraft {
 // This is the configuration for the shadow plugin, which is used to add libraries to the jar.
 configurations {
     shade
+    mixinProcessor
     compile.extendsFrom(shade)
+}
+
+def mixinVersion = '0.7.11-SNAPSHOT'
+// ForgeGradle automatically adds libs/** to compile; keep this runtime-only JAR outside it.
+def configurationsBackportJar = file('vendor/ConfigurationsBackport-1.8.9-1.1-masqueou-mixin-0.7.11.jar')
+
+// Keep the modified runtime artifact intact, but use only its own classes when compiling.
+// Its bundled Mixin and annotation processor must not shadow the declared Mixin dependency.
+task configurationsBackportApiJar(type: Jar) {
+    archiveName = 'ConfigurationsBackport-1.8.9-1.1-masqueou-mixin-0.7.11-api.jar'
+    destinationDir = file("$buildDir/dependencies")
+    from(zipTree(configurationsBackportJar)) {
+        include 'my_life_is_bad/**'
+    }
+}
+
+compileJava {
+    dependsOn configurationsBackportApiJar
+    options.annotationProcessorPath = configurations.mixinProcessor
 }
 
 // Configures the SpongePowered Repository
@@ -60,7 +80,7 @@ def systemOs = System.getProperty("os.name").toLowerCase(Locale.ENGLISH)
  * compile -> library only available at compile time (not accessible at runtime)
  */
 dependencies {
-    shade('org.spongepowered:mixin:0.7.11-SNAPSHOT') {
+    shade("org.spongepowered:mixin:${mixinVersion}") {
         exclude module: 'launchwrapper'
         exclude module: 'guava'
         exclude module: 'gson'
@@ -68,10 +88,18 @@ dependencies {
         exclude module: 'log4j-core'
     }
 
+    // Isolate Mixin's processor and its support libraries from bundled mod processors.
+    mixinProcessor("org.spongepowered:mixin:${mixinVersion}") {
+        transitive = false
+    }
+    mixinProcessor 'com.google.code.gson:gson:2.2.4'
+    mixinProcessor 'com.google.guava:guava:17.0'
+
     shade('it.unimi.dsi:fastutil:7.1.0')
 
     shade files('libs/ASMUtil-2.8.0.jar')     //patched for 1.8.9 log4j 2.0-beta9
-    compile 'my-life-is-bad:ConfigurationsBackport:1.8.9-1.1@jar'
+    compileOnly files(configurationsBackportApiJar)
+    runtime files(configurationsBackportJar)
 
     shade('meldexun:MemoryUtil:1.1.0@jar')
     shade('meldexun:MatrixUtil:1.5.0@jar')
@@ -187,6 +215,28 @@ sourceSets {
         ext.refMap = "mixins.renderlib.refmap.json"
     }
 }
+
+// ForgeGradle 2.1 derives source-set runtime classpaths from compile dependencies.
+afterEvaluate {
+    sourceSets.main.runtimeClasspath = sourceSets.main.runtimeClasspath - files(configurationsBackportApiJar) + files(configurationsBackportJar)
+}
+
+// Exercise mapping failures without a native OpenGL context or additional test libraries.
+task compileGLBufferMappingTest(type: JavaCompile) {
+    source files('src/main/java/meldexun/renderlib/util/GLBuffer.java',
+            'src/main/java/meldexun/renderlib/util/GLException.java', fileTree('src/test/glbuffer'))
+    classpath = files()
+    destinationDir = file("$buildDir/glbuffer-mapping-test")
+    sourceCompatibility = targetCompatibility = '1.8'
+    options.compilerArgs = ['-proc:none']
+}
+
+task verifyGLBufferMappings(type: JavaExec, dependsOn: compileGLBufferMappingTest) {
+    classpath = files(compileGLBufferMappingTest.destinationDir)
+    main = 'meldexun.renderlib.util.GLBufferMappingTest'
+}
+
+check.dependsOn verifyGLBufferMappings
 
 // Task that will build the mod and copy it to your instance (need to change the path to your instance)
 //TODO: (Optional) Change the path to your instance

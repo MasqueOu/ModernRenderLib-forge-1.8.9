@@ -40,7 +40,7 @@ public class MixinWorld implements ITileEntityHolder {
 	// 	return tileEntities;
 	// }
 
-	@ModifyArg(method = "updateEntities",at = @At(value = "INVOKE",target = "Ljava/util/List;removeAll(Ljava/util/Collection;)Z",ordinal = 2))
+	@ModifyArg(method = "updateEntities",at = @At(value = "INVOKE",target = "Ljava/util/List;removeAll(Ljava/util/Collection;)Z", remap = false, ordinal = 2))
 	private Collection<TileEntity> modifyRemoveArg(Collection<TileEntity> remove) {
 		if (isRemote) {
 			renderableTileEntityList.removeAll(remove);

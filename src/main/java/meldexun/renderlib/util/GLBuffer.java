@@ -38,9 +38,16 @@ public class GLBuffer implements MemoryAccess.SingleRegister {
 			this.buffer = GLUtil.createBuffer(size, flags | GL44.GL_MAP_PERSISTENT_BIT, usage);
 			this.size = size;
 			this.persistent = true;
-			this.mapped = true;
-			this.byteBuffer = GLUtil.map(this.buffer, size, persistentAccess | GL44.GL_MAP_PERSISTENT_BIT, 0, null);
-			this.address = NIOBufferUtil.getAddress(this.byteBuffer);
+			try {
+				mapBuffer(size, persistentAccess | GL44.GL_MAP_PERSISTENT_BIT, 0);
+			} catch (RuntimeException | Error e) {
+				try {
+					GL15.glDeleteBuffers(this.buffer);
+				} catch (RuntimeException | Error cleanupFailure) {
+					e.addSuppressed(cleanupFailure);
+				}
+				throw e;
+			}
 		} else {
 			this.buffer = GLUtil.createBuffer(size, flags, usage);
 			this.size = size;
@@ -71,10 +78,21 @@ public class GLBuffer implements MemoryAccess.SingleRegister {
 	 */
 	public void map(long length, int rangeAccess, int access) {
 		if (!persistent && !mapped) {
-			byteBuffer = GLUtil.map(buffer, length, rangeAccess, access, byteBuffer);
-			address = NIOBufferUtil.getAddress(byteBuffer);
-			mapped = true;
+			mapBuffer(length, rangeAccess, access);
 		}
+	}
+
+	private void mapBuffer(long length, int rangeAccess, int access) {
+		ByteBuffer mappedBuffer = GLUtil.map(buffer, length, rangeAccess, access, byteBuffer);
+		if (mappedBuffer == null) {
+			throw new GLException("Failed to map OpenGL buffer " + buffer + " (size=" + size
+					+ ", length=" + length + ", rangeAccess=0x" + Integer.toHexString(rangeAccess)
+					+ ", access=0x" + Integer.toHexString(access) + ")");
+		}
+		long mappedAddress = NIOBufferUtil.getAddress(mappedBuffer);
+		byteBuffer = mappedBuffer;
+		address = mappedAddress;
+		mapped = true;
 	}
 
 	public boolean isMapped() {
