@@ -23,6 +23,10 @@ tasks.register('verifyModJar') {
         def jar = new JarFile(artifact)
         try {
             def attributes = jar.manifest.mainAttributes
+            def expectedVersion = project.version.toString()
+            if (attributes.getValue('Implementation-Version') != expectedVersion) {
+                throw new GradleException('Manifest version does not match modVersion')
+            }
             [
                 FMLCorePlugin: 'meldexun.renderlib.asm.RenderLibPlugin',
                 ForceLoadAsMod: 'true',
@@ -45,6 +49,10 @@ tasks.register('verifyModJar') {
                 text.readLines().collect { it.split('#', 2)[0].trim().replaceAll(/\s+/, ' ') }
                     .findAll { !it.isEmpty() }.sort()
             }
+            def metadata = new JsonSlurper().parseText(read('mcmod.info')).find { it.modid == 'renderlib' }
+            if (metadata?.version != expectedVersion) {
+                throw new GradleException('mcmod.info version does not match modVersion')
+            }
             if (rules(read('META-INF/accesstransformer.cfg')) != rules(file('src/main/resources/META-INF/accesstransformer.cfg').getText('UTF-8'))) {
                 throw new GradleException('Access transformer rules changed during packaging/remapping')
             }
@@ -65,6 +73,8 @@ tasks.register('verifyModJar') {
             def minecraftSrgCall = false
             def mixinVersion = null
             def bufferApi = []
+            def annotationVersion = null
+            def publicVersion = null
             def log4jJar = configurations.compileClasspath.files.find { it.name == 'log4j-api-2.0-beta9.jar' }
             if (log4jJar == null) throw new GradleException('Compilation is not using the Minecraft 1.8.9 Log4j API')
             def loggerApi = [] as Set
@@ -93,6 +103,16 @@ tasks.register('verifyModJar') {
                     if (node.name == 'meldexun/renderlib/util/GLBuffer') {
                         bufferApi = node.methods.findAll { (it.access & Opcodes.ACC_PUBLIC) != 0 }.collect { it.name + it.desc }.sort()
                     }
+                    if (node.name == 'meldexun/renderlib/RenderLib') {
+                        publicVersion = node.fields.find { it.name == 'VERSION' }?.value
+                        def annotation = (node.visibleAnnotations ?: []).find { it.desc == 'Lnet/minecraftforge/fml/common/Mod;' }
+                        if (annotation != null) {
+                            def values = annotation.values
+                            for (int i = 0; i < values.size(); i += 2) {
+                                if (values[i] == 'version') annotationVersion = values[i + 1]
+                            }
+                        }
+                    }
                     node.methods.each { method ->
                         method.instructions.iterator().each { instruction ->
                             if (instruction instanceof MethodInsnNode) {
@@ -113,7 +133,10 @@ tasks.register('verifyModJar') {
                 'getAddress()J', 'dispose()V'].sort()
             if (bufferApi != expectedBufferApi) throw new GradleException('Public GLBuffer API changed')
             if (!minecraftSrgCall || mixinVersion != '0.7.11') throw new GradleException('SRG remapping/runtime Mixin verification failed')
-            logger.lifecycle("Verified ${artifact.name}: ${classCount} Java 8 classes, SRG calls, manifest, AT, refmap, Mixin ${mixinVersion}, Log4j beta9 and GLBuffer API.")
+            if (annotationVersion != expectedVersion || publicVersion != expectedVersion) {
+                throw new GradleException('@Mod/RenderLib.VERSION do not match modVersion')
+            }
+            logger.lifecycle("Verified ${artifact.name}: ${classCount} Java 8 classes, version ${expectedVersion} in @Mod/mcmod.info/manifest, SRG calls, AT, refmap, Mixin ${mixinVersion}, Log4j beta9 and GLBuffer API.")
         } finally {
             jar.close()
         }

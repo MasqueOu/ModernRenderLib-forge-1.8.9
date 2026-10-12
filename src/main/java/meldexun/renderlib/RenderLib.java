@@ -18,10 +18,11 @@ import net.minecraftforge.fml.common.Mod.EventHandler;
 import net.minecraftforge.fml.common.event.FMLConstructionEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 
-@Mod(modid = RenderLib.MODID, acceptableRemoteVersions = "*", dependencies = "required-after:configurationsbackport@[1.1,)")
+@Mod(modid = RenderLib.MODID, version = RenderLib.VERSION, acceptableRemoteVersions = "*", dependencies = "required-after:configurationsbackport@[1.1,)")
 public class RenderLib {
 
     public static final String MODID = "renderlib";
+    public static final String VERSION = RenderLibVersion.VERSION;
     public static final Logger LOGGER = LogManager.getLogger(MODID);
 
     @EventHandler

@@ -6,7 +6,7 @@ plugins {
     id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
-version = '1.4.5.5'
+version = providers.gradleProperty('modVersion').get()
 group = 'meldexun.renderlib'
 base.archivesName = 'RenderLib-1.8.9-port-1.8.9'
 
@@ -19,6 +19,27 @@ java {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
+
+def generatedVersionSources = layout.buildDirectory.dir('generated/sources/modVersion/java')
+def generateModVersion = tasks.register('generateModVersion') {
+    inputs.property('modVersion', project.version.toString())
+    outputs.dir(generatedVersionSources)
+    doLast {
+        def source = generatedVersionSources.get().file('meldexun/renderlib/RenderLibVersion.java').asFile
+        source.parentFile.mkdirs()
+        source.setText("""package meldexun.renderlib;
+
+/** Generated from modVersion in gradle.properties. */
+public final class RenderLibVersion {
+    public static final String VERSION = ${groovy.json.JsonOutput.toJson(project.version.toString())};
+
+    private RenderLibVersion() { }
+}
+""", 'UTF-8')
+    }
+}
+sourceSets.main.java.srcDir(generateModVersion)
+idea.module.generatedSourceDirs.add(generatedVersionSources.get().asFile)
 
 loom {
     forge {
@@ -116,7 +137,7 @@ dependencies {
     }
 }
 
-tasks.named('compileJava') { dependsOn configurationsBackportApiJar }
+tasks.named('compileJava') { dependsOn configurationsBackportApiJar, generateModVersion }
 
 tasks.named('processResources') {
     inputs.property('version', project.version)
@@ -134,7 +155,8 @@ def modManifest = [
     'FMLCorePluginContainsFMLMod': 'true',
     'TweakClass': 'org.spongepowered.asm.launch.MixinTweaker',
     'MixinConfigs': 'mixins.renderlib.json',
-    'FMLAT': 'accesstransformer.cfg'
+    'FMLAT': 'accesstransformer.cfg',
+    'Implementation-Version': project.version.toString()
 ]
 
 tasks.withType(Jar).configureEach {
