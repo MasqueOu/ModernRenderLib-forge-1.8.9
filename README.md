@@ -7,7 +7,7 @@ This project is based on two projects:
 - [RenderLib-1.8.9-port](https://github.com/my-life-is-bad/RenderLib-1.8.9-port) - port by my-life-is-bad
 
 ## Requirements
-This port requires [ConfigurationsBackport V1.1](https://github.com/my-life-is-bad/ConfigurationsBackport/releases/tag/v1.8.9-1.1)
+This port requires [ConfigurationsBackport V1.1](https://github.com/MasqueOu/ConfigurationsBackport)
 
 ## Required By
-My port of [ModernNothirium-forge-1.8.9](https://github.com/my-life-is-bad/ConfigurationsBackport/releases/tag/v1.8.9-1.1)
+My port of [ModernNothirium V1.0](https://github.com/MasqueOu/ModernNothirium-forge-1.8.9)
