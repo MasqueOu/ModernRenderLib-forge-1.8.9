@@ -53,6 +53,9 @@ tasks.register('verifyModJar') {
             if (metadata?.version != expectedVersion) {
                 throw new GradleException('mcmod.info version does not match modVersion')
             }
+            if (!metadata.logoFile || jar.getEntry(metadata.logoFile) == null) {
+                throw new GradleException('mcmod.info logoFile does not exist in the production JAR')
+            }
             if (rules(read('META-INF/accesstransformer.cfg')) != rules(file('src/main/resources/META-INF/accesstransformer.cfg').getText('UTF-8'))) {
                 throw new GradleException('Access transformer rules changed during packaging/remapping')
             }

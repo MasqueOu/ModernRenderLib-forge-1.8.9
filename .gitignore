@@ -12,6 +12,7 @@ out
 *.iws
 *.iml
 .idea
+.vscode/
 
 # gradle
 build
@@ -22,3 +23,9 @@ eclipse
 run
 
 .DS_Store
+Thumbs.db
+Desktop.ini
+*.log
+hs_err_pid*.log
+replay_pid*.log
+*.hprof
